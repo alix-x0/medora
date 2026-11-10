@@ -17,7 +17,7 @@ import numpy as np
 import pytesseract
 import re
 from rapidfuzz import fuzz, process
-from .drugs_service import drugs_service
+
 
 # Authentication Views
 
@@ -300,53 +300,4 @@ def scan_prescription(request):
         
     except Exception as e:
         return Response({"error": f"OCR processing failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-# Drug search (autocomplete)
 
-@api_view(['GET'])
-@permission_classes([AllowAny])
-def drug_search(request):
-    q = request.GET.get('q', '').strip()
-    try:
-        limit = min(int(request.GET.get('limit', 10)), 50)
-    except (ValueError, TypeError):
-        limit = 10
-
-    # Search DB first
-    if q:
-        db_qs = Drug.objects.filter(
-            Q(brand_name__icontains=q) | Q(generic_name__icontains=q)
-        ).values('brand_name', 'generic_name', 'form', 'dosage', 'code')[:limit]
-        db_results = [
-            {
-                "name": d['brand_name'] or d['generic_name'],
-                "generic_name": d['generic_name'],
-                "form": d['form'],
-                "dosage": d['dosage'],
-                "source": "algerian_registry",
-            }
-            for d in db_qs
-        ]
-    else:
-        db_results = []
-
-    # Fill remaining slots from DDInter in-memory index
-    remaining = limit - len(db_results)
-    if remaining > 0 and q:
-        ddinter_results = drugs_service.search_ddinter(q, limit=remaining)
-        combined = db_results + ddinter_results
-    else:
-        combined = db_results
-
-    return Response({"results": combined})
-
-
-# Drug-drug interaction check
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def interactions_check(request):
-    drugs = request.data.get('drugs', [])
-    if not isinstance(drugs, list) or len(drugs) < 2:
-        return Response({"error": "Provide at least 2 drug names in 'drugs'."}, status=status.HTTP_400_BAD_REQUEST)
-    result = drugs_service.check_interactions(drugs)
-    return Response(result)
